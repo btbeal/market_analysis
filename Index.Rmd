@@ -1,5 +1,6 @@
 ---
-title: "Market Analysis"
+title: "To Dump... or not to dump"
+subtitle: "strategies for investing lump sums into the s&p"
 knit: (function(input_file, encoding) {
   out_dir <- 'docs';
   rmarkdown::render(input_file,
@@ -125,7 +126,7 @@ Now that we know the deal, let's get into it.
 ```{r, warning=FALSE}
 investment <- 40000
 horizon    <- 72 # 5 year time horizon
-dca_period <- 3 # dollar cost average for a year with lump sum
+dca_period <- 12 # dollar cost average for a year with lump sum
 full_frame <- monthly_price_data %>% 
   # Max date we can map to is the maximum date in the set minus our time horizon
   filter(market_date <= max(market_date) - months(x = horizon)) %>% 
@@ -141,14 +142,6 @@ full_frame <- monthly_price_data %>%
     
     # Employ our Dollar-Cost Averaging Approach
     dca_approach     = map_dbl(market_date,
-                               ~dollar_cost_average(
-                                 .data = monthly_price_data,
-                                 .start_date = .x,
-                                 .time_period = dca_period,
-                                 .horizon = horizon,
-                                 .total_investment = investment
-                               )),
-    dca_3_investments = map_dbl(market_date,
                                ~dollar_cost_average(
                                  .data = monthly_price_data,
                                  .start_date = .x,
