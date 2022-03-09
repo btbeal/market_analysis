@@ -27,6 +27,8 @@ library(kableExtra)
 library(tidyverse)
 library(tidyquant)
 library(highcharter)
+
+options(dplyr.summarise.inform = FALSE)
 # Import data
 price_data <- tq_get(
   '^GSPC', 
