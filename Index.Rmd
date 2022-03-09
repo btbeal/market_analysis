@@ -1,0 +1,418 @@
+---
+title: "Market Analysis"
+knit: (function(input_file, encoding) {
+  out_dir <- 'docs';
+  rmarkdown::render(input_file,
+ encoding=encoding,
+ output_file=file.path(dirname(input_file), out_dir, 'index.html'))})
+author: "Brennan T. Beal"
+date: "3/6/2022"
+output:   
+  html_document:
+    theme: cosmo
+    highlight: tango
+    toc: true
+    toc_float: true
+---
+
+
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+library(kableExtra)
+library(tidyverse)
+library(tidyquant)
+library(highcharter)
+# Import data
+price_data <- tq_get(
+  '^GSPC', 
+  get = "stock.prices", 
+  # Note, the earliest price from the S&P is 1927
+  from = " 1957-01-01")
+# Analysis:
+# For each month, 
+# --- calculate the return of two strategies:
+# 1. Dump 30k in the market that day
+# 2. Dollar-cost average for 12 months
+# Calculate returns after 5 years from the initial date.
+# We need to do some work to the imported data:
+monthly_price_data <- price_data %>% 
+  # Filter for the first day of every month
+  filter(day(date) == 1) %>%
+  # Handle missing months (this is not ideal... )
+  # Take care of some of it by using average of bookend months
+  # ... this doesn't catch all and I'm too lazy rn to implement a more elegant solution
+  # for the rest, we'll just fill with previous closing value
+  # Note, I'm using close because opening pricing data has many more  missing months
+  complete(date = seq.Date(min(date), max(date), by="month")) %>%
+  mutate(new_close = if_else(is.na(close),
+                             slider::slide_dbl(close, mean, .before = 2, .after = -1),
+                             close)) %>% 
+  fill(new_close) %>% 
+  rename(market_date = date)
+```
+  
+```{r define_functions}
+# Calculate returns given two dates and the investment
+# -- this will be used to map over all dates and some time horizone
+calculate_returns <- function(.min_date, .max_date, .investment, .data){
+  
+  
+  # Ideally here, we would use the opening price; however, there are large
+  # ... chunks of missing data for opening prices
+  initial_close <- .data$new_close[.data$market_date == .min_date]
+  final_close <- .data$new_close[.data$market_date == .max_date]
+  
+  # The return is simply the investment multiplied by the percentage or initial basis
+  roi <- .investment*(1-((initial_close-final_close)/initial_close))
+  
+  return(roi)
+  
+}
+dollar_cost_average <- function(.data, .start_date, .time_period, .horizon, .total_investment){
+  
+  df       <- .data
+  
+  # Maximum date to calculate returns should be the complete horizon
+  # (ie, if you want to average for a year, but the horizon is 5 years,
+  #  ... the return should be for the five year mark)
+  max_date <- ymd(.start_date) + months(x = .horizon)
+  
+  
+  # The max investment date is the last date of investing when dollar cost averaging
+  # (ie, if one were to invest over 12 moths, the 12th month would be the max investment date)
+  # Note, we have to add the time period - 1 because the first month is accounted for
+  max_investment_date <- ymd(.start_date) + months(x = (.time_period - 1))
+  
+  
+  # The monthly investment should be the total capital divided by the time period
+  # ... for averaging
+  monthly_investment <- .total_investment/.time_period
+  
+  # get the appropriate date vector to map rllling returns over
+  date_vec <- df %>% 
+    filter(market_date >= lubridate::ymd(.start_date),
+           market_date <= max_investment_date) %>% 
+    pull(market_date)
+  
+  monthly_values <- date_vec %>%
+    setNames(., nm = as.character(1:(.time_period))) %>% 
+    purrr::map_df(.,
+               .f = ~calculate_returns(.data = df,
+                                       .min_date = ymd(.x),
+                                       .max_date = max_date,
+                                       .investment = monthly_investment) %>% 
+                 as.tibble(),
+               .id = "month")
+  
+  sum(monthly_values$value)
+  
+}
+```
+
+### Intro  
+  
+It's that time of year again - bonus time. Assuming all has went well, this is a pretty great time of the year. But every year around this time, I find myself asking "what should I do with this?" My inclination is that it really doesn't matter... save it... invest it... don't blow it. The usual. Fine, I'll skip the vegas trip this year. But if I'm going to invest my money, how should I do it? There are two pretty intuitive approaches (for this non-finance guy). First, I could just invest it all at once, when it's distributed. But then again, if the market is bad, maybe I should dollar-cost average (DCA) over a period of time so as not to catch a falling knife, as the cool kids say.  
+  
+The purpose of this blog is to explore the nuances of both approaches. In the following, I'll gather the s&p 500 data from since... forever (1957). Then, I'll use that data to compare each approach (upfront vs DCA) to see what works best. Though, before I get into it, I'll note some upfront limitations. Most notably, I'm not a financial advisor. I... AM NOT... a financial advisor. Second, apparently the opening and closing values for the S&P 500 are not always listed. For values that aren't listed but that have bordering values, I take the average, for those with larger gaps than just one value, I've carried the last observation forward (LOCF). Admittedly, this is not the best approach but i'm trying to answer a question on a lazy Sunday so give me a break. They'll be a sensitivity analysis. Relax.  
+  
+Now that we know the deal, let's get into it.  
+  
+### The basics
+
+```{r, warning=FALSE}
+investment <- 40000
+horizon    <- 72 # 5 year time horizon
+dca_period <- 3 # dollar cost average for a year with lump sum
+full_frame <- monthly_price_data %>% 
+  # Max date we can map to is the maximum date in the set minus our time horizon
+  filter(market_date <= max(market_date) - months(x = horizon)) %>% 
+  mutate(
+    
+    # Employ our upfront approach
+    upfront_approach = map_dbl(market_date,
+                               ~calculate_returns(
+                                 .data = monthly_price_data,
+                                 .min_date = .x,
+                                 .max_date = ymd(.x) + months(horizon),
+                                 .investment = investment)),
+    
+    # Employ our Dollar-Cost Averaging Approach
+    dca_approach     = map_dbl(market_date,
+                               ~dollar_cost_average(
+                                 .data = monthly_price_data,
+                                 .start_date = .x,
+                                 .time_period = dca_period,
+                                 .horizon = horizon,
+                                 .total_investment = investment
+                               )),
+    dca_3_investments = map_dbl(market_date,
+                               ~dollar_cost_average(
+                                 .data = monthly_price_data,
+                                 .start_date = .x,
+                                 .time_period = dca_period,
+                                 .horizon = horizon,
+                                 .total_investment = investment
+                               )),
+    
+    # Find the difference between the two
+    diff = upfront_approach - dca_approach,
+    
+    # This flag will be used to summarise the proportion of times the upfront strategy is "correct"
+    upfront_correct = if_else(upfront_approach >= dca_approach, 1, 0)
+    
+  ) 
+comparison_frame <- full_frame %>% 
+  select(market_date, upfront_approach, dca_approach, diff) %>% 
+  as.data.frame()
+xts_frame <- xts(comparison_frame[-1], order.by = comparison_frame$market_date)
+```
+
+The first thing we should do is simply... check out the data - what does the S&P look like over time? Maybe this can tell us something about expected performance.  
+  
+```{r}
+stock_data <- price_data %>% 
+  select(date, close)
+stock_data_ts <- xts(stock_data[-1], order.by = stock_data$date)
+highchart(type = "stock") %>% 
+   hc_add_series(data = stock_data_ts$close) %>% 
+  highcharter::hc_xAxis(
+    labels = list(format = "{value: %Y}"))  %>% 
+  hc_tooltip(
+    pointFormat = 'Date: {point.x: %Y-%m-%d}<br>
+                            Value: ${point.y:,.2f}',
+    headerFormat = '')  %>%
+  hc_title(
+    text = "S&P Closing Price Over Time",
+    align = "left"
+  ) 
+```
+
+There's nothing surprising here. The dot com bubble... 2008... we know, we've seen it. So then, let's define some strategies and try them out in our safe space: the past.  
+  
+#### Strategy 1  
+  
+Strategy 1 will be an upfront approach, and will be referred to as that going forward. What this means is that we'll take our bonus (or any lump sum) and simply dump it in the market as soon as we get it. For simplicity, I'm assuming that we're putting our money in at the first of each month. For this approach, I'll take the lump sum, and invest it all at once at the beginning of each month, and we'll see where we are at the end of five years.  
+  
+#### Strategy 2  
+  
+For strategy 2, we'll take a lump sum and divide it by 12. We'll then take that quotient and invest it each subsequent month for 12 months (dollar-cost average) and then let it sit for 5 years.  
+  
+### Analysis  
+  
+The first, and most obvious question, is how often are is the lump-sum approach "correct". In that sense, I mean how often do we win, on average - to say nothing of how much we're winning when we do. 
+  
+```{r}
+upfront_correct <- full_frame %>% 
+  summarise(val = mean(upfront_correct)) %>% 
+  pull(val)
+kable_prop_making_money <- full_frame %>% 
+  # create columns to compare signs after storing data in 'sign_check' below 
+  mutate(upfront_gains = if_else(upfront_approach > investment, 1, 0),
+         dca_gains     = if_else(dca_approach     > investment, 1, 0)) %>% 
+  # store data step outside of the pipe
+  {{sign_check <<- .}} %>% 
+  pivot_longer(cols = contains("gains"),
+               names_to = "Strategy") %>% 
+  group_by(Strategy) %>% 
+  summarise(`Proportion Exceeding Investment` = scales::percent(mean(value))) %>% 
+  mutate(Strategy = c("DCA", "Upfront")) %>% 
+  kableExtra::kable(
+    caption = "The Percentage of Times a Given Strategy Makes Money"
+  ) %>% 
+  kableExtra::kable_styling(bootstrap_options = c("striped", "hover"))
+sign_diff <- sign_check %>% 
+  mutate(sign_diff = if_else(upfront_gains != dca_gains, 1, 0)) %>% 
+  summarise(sign_diff = mean(sign_diff)) %>% 
+  pull(sign_diff)
+```
+  
+When comparing these approaches, the upfront approach has outperformed the dollar-cost averaging approach `r scales::percent(upfront_correct)` of the time, but it seems like for the most part, the differences are negligible. And no matter what, we can also see that you're at least gaining money over the 5-year period over 80% of the time with either approach and there are only a small percentage of times where one strategy makes money and the other doesn't (`r scales::percent(sign_diff)`):  
+  
+```{r}
+kable_prop_making_money
+```
+  
+
+The rest of the summary statistics tell a similar story - you're doing better with an upfront approach but not by much.
+  
+```{r}
+bind_rows(
+         formattable::currency(summary(full_frame$upfront_approach)),
+         formattable::currency(summary(full_frame$dca_approach)),
+        abs(formattable::currency(summary(full_frame$diff)))) %>% 
+  bind_cols(
+    tibble(
+      Strategy = c("Upfront", "DCA", "Absolute Difference")
+    )
+  ) %>% 
+  select(
+    Strategy,
+    everything()
+  ) %>% 
+  kableExtra::kable() %>% 
+  kableExtra::kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+I also wanted to take a look at the 5-year returns by month and strategy. Below, there are two charts. The first is the total 5-year returns for all 722 months that we initiate the two strategies. So, each bar represents those returns had we began both strategies that month. The second chart is similar but represents the *differences* in 5-year returns between the two strategies, with red values indicating a particular starting month where DCA outperformed. The green represents the opposite.  
+
+```{r}
+hchart(full_frame, 
+       "column", 
+       hcaes(
+         x = market_date, 
+         y = upfront_approach
+       ), 
+       color = "#488FB1", 
+       yAxis = 0) %>% 
+  hc_yAxis_multiples(
+    list(
+      title = list(
+        text = "Upfront"
+      ), 
+      top = "0%", 
+      height = "40%"),
+    list(
+      title = list(
+        text = "DCA"
+        ), 
+      top = "50%", 
+      height = "40%", 
+      opposite = TRUE)  
+  ) %>%
+  hc_add_series(full_frame, 
+                "column", 
+                color = "#533E85",
+                hcaes(x = market_date, y = dca_approach), 
+                yAxis = 1) %>% 
+  hc_tooltip(
+    pointFormat = 'Date: {point.x: %Y-%m-%d}<br>
+                            5-Year Returns: ${point.y:,.2f}',
+    headerFormat = '') %>%
+  hc_title(
+    text = "5-Year Return by Strategy and Beginning Month",
+    align = "left"
+  ) %>% 
+  hc_subtitle(
+    text = "assuming a $40k investment",
+    align = "left"
+  )  %>%  
+  hc_legend(enabled = F)
+```
+
+```{r comparing_approaches}
+highcharter::highchart() %>% 
+  highcharter::hc_add_series(
+    name = "Upfront Approach", 
+    data = xts_frame$diff,
+    type = "column", 
+    color = "#488FB1",
+    negativeColor = "#533E85"
+  ) %>% 
+  hc_tooltip(
+    pointFormat = 'Date: {point.x: %Y-%m-%d}<br>
+                            Difference: ${point.y:,.2f}',
+    headerFormat = '') %>% 
+  highcharter::hc_xAxis(
+    labels = list(format = "{value: %Y}")) %>% 
+  hc_yAxis(
+    labels = list(
+      formatter = JS(
+        "function(){
+        if(this.value >= 0){
+        byThousand = this.value/1000 + 'k'
+        return(byThousand)
+        } else {
+        byThousand = '-$' + this.value/1000*-1 + 'k'
+        return(byThousand)
+        }
+        }"
+      )
+    )
+  ) %>%
+  hc_title(
+    text = "Comparing Upfront versus a Dollar-Cost Averaging Approach with a Lump Sum",
+    align = "left"
+  ) %>%
+  hc_subtitle(
+    text = "where positive values favor an upfront approach",
+    align = "left"
+  ) %>%  
+  hc_legend(enabled = F)
+  
+```
+  
+This is less clear than i'd like, but not unexpected. We know so far that `r scales::percent(upfront_correct)` of the time the upfront approach has better returns, but that most of the time you'll be positive after five years no matter what. So far, I'd say nothing conclusive. So finally, I want to know: what were the best five months (in terms of differences) favoring the upfront approach versus the best five months favoring the DCA approach in the last 30 years? Knowing this, we'll be able to look back at our stock over time and form some hypotheses about what strategies work best in certain market conditions.  
+  
+  
+```{r table_of_top_5}
+full_frame %>% 
+  mutate(favor_flag = if_else(diff < 0, 1, 0)) %>% 
+  filter(year(market_date) > 1990) %>% 
+  group_by(favor_flag) %>% 
+  mutate(abs_diff = abs(diff)) %>% 
+  slice_max(abs_diff, n = 5) %>% 
+  mutate(Strategy = if_else(favor_flag == 1, "DCA", "Upfront"),
+         Return = if_else(favor_flag == 1, dca_approach, upfront_approach)) %>% 
+  ungroup() %>% 
+  {{top_dates <<- .}} %>% 
+  transmute(`Date` = market_date, Difference = scales::dollar(abs_diff), Return = scales::dollar(Return)) %>% 
+  kable(
+    caption = "Top 5 Dates Where a Given Strategy Outperformed the Other"
+  ) %>% 
+  kable_styling() %>% 
+  pack_rows("Upfront Strategy", 1, 5, label_row_css = "background-color: #488FB1; color: #fff;") %>%
+  pack_rows("DCA Strategy", 6, 10,  label_row_css = "background-color: #533E85; color: #fff;") 
+```
+
+  
+So with this information, let's lay it over our stock market data and see the trends (if the recurring 2008 hasn't already set it off).  
+
+
+```{r labeling_top_5}
+dates <- top_dates$market_date
+text_for_chart <- tibble(
+  date = dates,
+  title = paste(top_dates$Strategy),
+  abs_diff = top_dates$abs_diff,
+  text = paste0('Favored Strategy:', title, '<br> Difference ',scales::dollar(abs_diff))
+)
+highchart(type = "stock") %>% 
+   hc_add_series(data = stock_data_ts$close, id = "stonks",
+                 tooltip = list(
+                   pointFormat = 'Date: {point.x: %Y-%m-%d}<br>
+                            Value: ${point.y:,.2f}',
+                   headerFormat = ''
+                 )) %>% 
+  highcharter::hc_xAxis(
+    labels = list(format = "{value: %Y}")) %>% 
+  hc_title(
+    text = "S&P Closing Price Over Time",
+    align = "left"
+  ) %>% 
+  hc_add_series(
+    text_for_chart[text_for_chart$title == "DCA",], 
+    hcaes(x = date),
+    type = "flags", 
+    shape = "circlepin",
+    onSeries = "stonks",
+    color = "#533E85"
+  ) %>% 
+  hc_add_series(
+    text_for_chart[text_for_chart$title == "Upfront",], 
+    hcaes(x = date),
+    type = "flags", 
+    shape = "circlepin",
+    onSeries = "stonks",
+    color = "#488FB1"
+  )
+```
+  
+  
+Unsurprisingly, it seems like the biggest differences in the two strategies are realized in bullish or bearish markets, with bullish markets favoring an upfront approach. Timing is everything, as they say.  
+  
+  
+
+
