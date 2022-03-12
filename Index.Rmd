@@ -14,7 +14,7 @@ params:
 output:   
   html_document:
     code_folding: hide
-    theme: cosmo
+    theme: flatly
     highlight: tango
     toc: true
     toc_float: true
