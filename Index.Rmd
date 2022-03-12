@@ -10,7 +10,7 @@ date: "3/6/2022"
 params:
   time_horizon: 60 # 5 year time horizon
   dca_period: 12 # one-year dca
-  initial_investment: 40000 # $40k bonus
+  initial_investment: 1000000 # $ a MILLION dollars
 output:   
   html_document:
     code_folding: hide
@@ -122,11 +122,11 @@ dollar_cost_average <- function(.data, .start_date, .time_period, .horizon, .tot
 
 ### Tl;dr  
   
-***Historically, investing all of one's money at the time of bonus is a stronger strategy; however, this is likely due to the fact that since the beginning of the S&P, the market has mostly done well. In bearish markets, we can see that a dollar-cost averaging approach can sometimes save one a lot of money!***
+***Historically, investing all of one's money at the time of receipt is a stronger strategy; however, this is likely due to the fact that since the beginning of the S&P, the market has mostly done well. In bearish markets, we can see that a dollar-cost averaging approach can sometimes save one a lot of money!***
 
 ### Intro  
   
-It's that time of year again - bonus time. Assuming all has went well, this is a pretty great time of the year. But every year around this time, I find myself asking "what should I do with this?" My inclination is that it really doesn't matter... save it... invest it... don't blow it. The usual. Fine, I'll skip the vegas trip this year. But if I'm going to invest my money, how should I do it? There are two pretty intuitive approaches (for a non-finance guy). First, I could just invest it all at once, when it's distributed. But then again, if the market is bad, maybe I should dollar-cost average (DCA) over a period of time so as not to catch a falling knife, as the cool kids say. The purpose of this blog is to explore the nuances of both approaches.  
+The famous question: what to do if I had a million dollars? Well, my inclination is that it really doesn't matter... save it... invest it... don't blow it. The usual. Fine, I'll skip the vegas trip this year. But if I'm going to *invest* my money, how should I do it? There are two pretty intuitive approaches (for a non-finance guy). First, I could just invest it all at once, when it's distributed. But then again, if the market is bad, maybe I should dollar-cost average (DCA) over a period of time so as not to catch a falling knife, as the cool kids say. The purpose of this blog is to explore the nuances of both approaches.  
   
 In the following, I'll gather the s&p 500 data from 1957. Then, I'll use that data to compare each approach (upfront vs DCA) to see what works best. Though, before I get into it, I'll note some upfront limitations. Most notably, I'm not a financial adviser. Second, apparently the opening and closing values for the S&P 500 are not always listed. For values that aren't listed but that have bordering values, I take the average, for those with larger gaps than just one value, I've carried the last observation forward (LOCF). Admittedly, this is not the best approach but i'm trying to answer a question on a lazy Sunday so give me a break.  
   
