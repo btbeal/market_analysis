@@ -1,6 +1,5 @@
 ---
-title: "To Dump... or not to dump"
-subtitle: "strategies for investing lump sums into the s&p"
+title: "To Dump... or not to dump: comparing strategies for investing lump sums into the S&P"
 knit: (function(input_file, encoding) {
   out_dir <- 'docs';
   rmarkdown::render(input_file,
@@ -8,8 +7,13 @@ knit: (function(input_file, encoding) {
  output_file=file.path(dirname(input_file), out_dir, 'index.html'))})
 author: "Brennan T. Beal"
 date: "3/6/2022"
+params:
+  time_horizon: 60 # 5 year time horizon
+  dca_period: 12 # one-year dca
+  initial_investment: 40000 # $40k bonus
 output:   
   html_document:
+    code_folding: hide
     theme: cosmo
     highlight: tango
     toc: true
@@ -21,8 +25,8 @@ output:
 
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = FALSE,
-                      warning = FALSE)
+knitr::opts_chunk$set(warning = FALSE)
+
 library(kableExtra)
 library(tidyverse)
 library(tidyquant)
@@ -124,16 +128,16 @@ dollar_cost_average <- function(.data, .start_date, .time_period, .horizon, .tot
   
 It's that time of year again - bonus time. Assuming all has went well, this is a pretty great time of the year. But every year around this time, I find myself asking "what should I do with this?" My inclination is that it really doesn't matter... save it... invest it... don't blow it. The usual. Fine, I'll skip the vegas trip this year. But if I'm going to invest my money, how should I do it? There are two pretty intuitive approaches (for a non-finance guy). First, I could just invest it all at once, when it's distributed. But then again, if the market is bad, maybe I should dollar-cost average (DCA) over a period of time so as not to catch a falling knife, as the cool kids say. The purpose of this blog is to explore the nuances of both approaches.  
   
-In the following, I'll gather the s&p 500 data from 1957. Then, I'll use that data to compare each approach (upfront vs DCA) to see what works best. Though, before I get into it, I'll note some upfront limitations. Most notably, I'm not a financial advisor. Second, apparently the opening and closing values for the S&P 500 are not always listed. For values that aren't listed but that have bordering values, I take the average, for those with larger gaps than just one value, I've carried the last observation forward (LOCF). Admittedly, this is not the best approach but i'm trying to answer a question on a lazy Sunday so give me a break.  
+In the following, I'll gather the s&p 500 data from 1957. Then, I'll use that data to compare each approach (upfront vs DCA) to see what works best. Though, before I get into it, I'll note some upfront limitations. Most notably, I'm not a financial adviser. Second, apparently the opening and closing values for the S&P 500 are not always listed. For values that aren't listed but that have bordering values, I take the average, for those with larger gaps than just one value, I've carried the last observation forward (LOCF). Admittedly, this is not the best approach but i'm trying to answer a question on a lazy Sunday so give me a break.  
   
 Now that we know the deal, let's get into it.  
   
 ### The basics
 
 ```{r, warning=FALSE}
-investment <- 40000
-horizon    <- 72 # 5 year time horizon
-dca_period <- 12 # dollar cost average for a year with lump sum
+investment <- params$initial_investment
+horizon    <- params$time_horizon # 5 year time horizon
+dca_period <- params$dca_period # dollar cost average for a year with lump sum
 full_frame <- monthly_price_data %>% 
   # Max date we can map to is the maximum date in the set minus our time horizon
   filter(market_date <= max(market_date) - months(x = horizon)) %>% 
@@ -161,12 +165,17 @@ full_frame <- monthly_price_data %>%
     diff = upfront_approach - dca_approach,
     
     # This flag will be used to summarise the proportion of times the upfront strategy is "correct"
-    upfront_correct = if_else(upfront_approach >= dca_approach, 1, 0)
+    upfront_correct = if_else(upfront_approach >= dca_approach, 1, 0),
+    
+    # Text of favored strat
+    favored = if_else(upfront_correct == 1, "Upfront", "DCA")
     
   ) 
 comparison_frame <- full_frame %>% 
-  select(market_date, upfront_approach, dca_approach, diff) %>% 
+  mutate(favored = if_else(upfront_correct == 1, "Upfront", "DCA")) %>% 
+  select(market_date, close, upfront_approach, dca_approach, diff) %>% 
   as.data.frame()
+
 xts_frame <- xts(comparison_frame[-1], order.by = comparison_frame$market_date)
 ```
 
@@ -208,13 +217,14 @@ For the analysis I want to know a couple key questions:
     2. When the two approaches differ, how much do they differ by?
     3. When are the two approaches the most different and can we learn something from that?  
   
-
-The first, and most obvious question, is how often are is the lump-sum approach "correct". In that sense, I mean how often do we win, on average - to say nothing of how much we're winning when we do. 
+Let's look at some initial summary statistics to answer the first couple questions:  
   
 ```{r}
 upfront_correct <- full_frame %>% 
   summarise(val = mean(upfront_correct)) %>% 
   pull(val)
+
+
 kable_prop_making_money <- full_frame %>% 
   # create columns to compare signs after storing data in 'sign_check' below 
   mutate(upfront_gains = if_else(upfront_approach > investment, 1, 0),
@@ -230,13 +240,15 @@ kable_prop_making_money <- full_frame %>%
     caption = "The Percentage of Times a Given Strategy Makes Money"
   ) %>% 
   kableExtra::kable_styling(bootstrap_options = c("striped", "hover"))
+
+
 sign_diff <- sign_check %>% 
   mutate(sign_diff = if_else(upfront_gains != dca_gains, 1, 0)) %>% 
   summarise(sign_diff = mean(sign_diff)) %>% 
   pull(sign_diff)
 ```
   
-When comparing these approaches, the upfront approach has outperformed the dollar-cost averaging approach `r scales::percent(upfront_correct)` of the time, but it seems like for the most part, the differences are negligible (see the summary statistics below0. And no matter what, we can also see that you're at least gaining money over the 5-year period over 80% of the time with either approach and there are only a small percentage of times where one strategy makes money and the other doesn't (`r scales::percent(sign_diff)`):  
+
   
 ```{r}
 kable_prop_making_money
@@ -247,7 +259,7 @@ kable_prop_making_money
 bind_rows(
          formattable::currency(summary(full_frame$upfront_approach)),
          formattable::currency(summary(full_frame$dca_approach)),
-        abs(formattable::currency(summary(full_frame$diff)))) %>% 
+         formattable::currency(summary(full_frame$diff))) %>% 
   bind_cols(
     tibble(
       Strategy = c("Upfront", "DCA", "Absolute Difference")
@@ -257,13 +269,13 @@ bind_rows(
     Strategy,
     everything()
   ) %>% 
-  kableExtra::kable() %>% 
+  kableExtra::kable(.,
+                    caption = "Summary Statistics for Each Approach as well as Summary Statistics for the Absolute Difference of Each Approach") %>% 
   kableExtra::kable_styling(bootstrap_options = c("striped", "hover"))
 ```
-
-So we know that an upfront approach is usually better, but I would assume that's because since 1957 the markets have mostly performed well with a couple exceptions (that's a guess - again, not an advisor).  
+When comparing these approaches, the upfront approach has outperformed the dollar-cost averaging approach `r scales::percent(upfront_correct)` of the time, but it seems like for the most part, the differences are negligible. The summary stats above tell us that ~75% of the time our differences between strategies will be confined to $6k over five years (or ~15% of our initial investment). And no matter what, we can also see that you're at least gaining money over the 5-year period over 80% of the time with either approach and there are only a small percentage of times where one strategy makes money and the other doesn't (`r scales::percent(sign_diff)`). So, this should take some pressure off; however, the outliers make me nervous. 
   
-I want the look at these numbers a different way. First, I want to see the five-year returns, by initiation month, and by strategy. Then, I want to see the differences in the two strategies. The first chart below provides the former with the second chart providing information on the latter. In the second chart, the blue reprpesents initiation months where an upfront approach outperformed and the purple represents the opposite.  
+Now that we've got that out of the way, I want the look at these numbers a different way. First, I want to see the five-year returns, by initiation month, and by strategy. Then, I want to see the differences in the two strategies. The first chart below provides the former with the second chart providing information on the latter. In the second chart, the blue represents initiation months where an upfront approach outperformed and the purple represents the opposite.  
 
 ```{r}
 hchart(full_frame, 
@@ -355,7 +367,7 @@ This is less clear than i'd like, but not unexpected. We know so far that `r sca
   
 So far, I'd say nothing conclusive.   
   
-So finally, I want to know: what were the best five months (in terms of differences) favoring the upfront approach versus the best five months favoring the DCA approach in the last 30 years? Knowing this, we'll be able to look back at our stock over time and form some hypotheses about what strategies work best in certain market conditions.  
+So finally, I want to know: what were the best five months (in terms of differences) favoring the upfront approach versus the best five months favoring the DCA approach in the last 30 years? Knowing these things, we'll be able to look back at our stock over time and form some hypotheses about what strategies work best in certain market conditions.  
   
   
 ```{r table_of_top_5}
@@ -379,12 +391,8 @@ full_frame %>%
 ```
 
   
-Above is the best performing months for each strategy, how much better that strategy was than the alternative, and the total five-year return (you can reduce the return of the underperforming strategy by taking the difference of the return for a given strategy and how much it outperformed).  
+We can see the best performing months (in terms of strategy differences) and the results are unsurprising with a little bit of context about what was going on during those periods. So, the final task is to overlay those five points on our stock market data to see the trends. Additionally, I'll add the best performing strategy for each month in the tooltip for fun.    
   
-To make these months mean something (if 2008 did not already), let's overlay it on our stock chart from above.  
-  
-
-
 
 ```{r labeling_top_5}
 dates <- top_dates$market_date
@@ -394,17 +402,24 @@ text_for_chart <- tibble(
   abs_diff = top_dates$abs_diff,
   text = paste0('Favored Strategy:', title, '<br> Difference ',scales::dollar(abs_diff))
 )
-highchart(type = "stock") %>% 
-   hc_add_series(data = stock_data_ts$close, id = "stonks",
+
+highchart() %>% 
+   hc_add_series(data = full_frame, id = "stonks",
+                 type = 'line',
+                 hcaes(x = market_date, y = new_close),
                  tooltip = list(
-                   pointFormat = 'Date: {point.x: %Y-%m-%d}<br>
-                            Value: ${point.y:,.2f}',
+                   pointFormat = 'Date: {point.market_date: %Y-%m-%d}<br>
+                            Value: ${point.new_close:,.2f} <br> Favored Strategy: {point.favored}',
                    headerFormat = ''
                  )) %>% 
   highcharter::hc_xAxis(
     labels = list(format = "{value: %Y}")) %>% 
   hc_title(
-    text = "S&P Closing Price Over Time",
+    text = "Top 5 Months for each Strategy",
+    align = "left"
+  ) %>% 
+  hc_subtitle(
+    text = "in terms of their difference from the other strategy",
     align = "left"
   ) %>% 
   hc_add_series(
@@ -413,7 +428,10 @@ highchart(type = "stock") %>%
     type = "flags", 
     shape = "circlepin",
     onSeries = "stonks",
-    color = "#533E85"
+    color = "#533E85",
+    tooltip = list(
+                   headerFormat = ''
+                 )
   ) %>% 
   hc_add_series(
     text_for_chart[text_for_chart$title == "Upfront",], 
@@ -421,13 +439,30 @@ highchart(type = "stock") %>%
     type = "flags", 
     shape = "circlepin",
     onSeries = "stonks",
-    color = "#488FB1"
-  )
+    color = "#488FB1",
+    tooltip = list(
+                   headerFormat = ''
+                 )
+  )  %>% 
+  hc_yAxis(
+    labels = list(
+      formatter = JS(
+        "function(){
+        if(this.value >= 0){
+        byThousand = this.value/1000 + 'k'
+        return(byThousand)
+        } else {
+        byThousand = '-$' + this.value/1000*-1 + 'k'
+        return(byThousand)
+        }
+        }"
+      )
+    )
+  ) %>%
+  hc_legend(enabled = FALSE)
 ```
   
   
 Unsurprisingly, it seems like the biggest differences in the two strategies are realized in bullish or bearish markets, with bullish markets favoring an upfront approach. Timing is everything, as they say.  
   
   
-
-
